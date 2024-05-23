@@ -8,11 +8,12 @@ In this write-up I will exemplify what I was able to explore in the customizatio
 
 ## Scenario
 
-The rule "[Attacker Technique - Inbox Forwarding Rule Created](https://docs.rapid7.com/insightidr/cloud-service-activity/)" is native of InsightIDR. As mentioned by [MITRE ATT\&CK](https://attack.mitre.org/techniques/T1114/003/), adversaries can abuse this feature to collect sensitive information, monitor victims' activities or even maintain persistent access to emails, even after the compromised credentials are reset. Rapid7's InsightIDR proposes detection whenever an email redirection is created. 
+The rule "[Attacker Technique - Inbox Forwarding Rule Created](https://docs.rapid7.com/insightidr/cloud-service-activity/)" is native of InsightIDR. As mentioned by [MITRE ATT\&CK](https://attack.mitre.org/techniques/T1114/003/), adversaries can abuse this feature to collect sensitive information, monitor victims' activities or even maintain persistent access to emails, even after the compromised credentials are reset. Rapid7's InsightIDR proposes detection whenever an email redirection is created.
 
 This is an example of a simplified JSON log that would trigger the rule:
 
-<pre><code>{
+```
+{
     "source_json": {
         "Operation": "New-InboxRule",
         "Parameters": [
@@ -23,7 +24,7 @@ This is an example of a simplified JSON log that would trigger the rule:
         ]
     }
 }
-</code></pre>
+```
 
 However, let’s assume that our company doesn't want to see alerts for domains of its own (@mycompany.com and @company.com).
 
@@ -33,7 +34,9 @@ However, let’s assume that our company doesn't want to see alerts for domains 
 
 The easiest way I could find to acheive this was through regular expression, because we're working with a multi-valued field. Simple conditions like `IS` or `CONTAINS` will not work. The regular expression bellow will match when `source_json.Parameters.Value` holds the value of `text@company.com;test@mycompany.com;othertest@company.com` but will not when it holds the value `test@mycompany.com;test2@company.com.br;empresa@gmail.com`.
 
-<pre class="language-regex"><code class="lang-regex">^(\w+?@((mycompany|company)\.com(\.br)*?))(;\s*?\w+?@((mycompany|company)\.com(\.br)*?))*?$</code></pre>
+```regex
+^(\w+?@((mycompany|company)\.com(\.br)*?))(;\s*?\w+?@((mycompany|company)\.com(\.br)*?))*?$
+```
 
 {% hint style="info" %}
 The explanation for the regex and an example can be found on the link: [https://regex101.com/r/s8FQdh/1](https://regex101.com/r/s8FQdh/1).
@@ -55,21 +58,19 @@ It is possible to use a negative lookahead in the regex (which InsightIDR doesn'
 
 <figure><img src="../.gitbook/assets/image (1).png" alt=""><figcaption></figcaption></figure>
 
-- `| table source_json.*`: Creates a table view.
-- `| rename "source_json.Parameters{}.Value" as value`: Simplifies the field to avoid errors with .JSON lists.
-- `| eval trigger=if(match(value,"@(?!company.com|mycompany.com)([^;]+)"), 1, 0)`: The eval function creates the field "trigger" to be populated with the value 1 if it matches and 0 if it does not. The regex is a negative lookahead, which will identify or filter out email addresses that belong to specific domains (in this case, "company.com" or "mycompany.com") and only act on email addresses with other domains.
-- `| search trigger=1`: Filters for the value 1.
+* `| table source_json.*`: Creates a table view.
+* `| rename "source_json.Parameters{}.Value" as value`: Simplifies the field to avoid errors with .JSON lists.
+* `| eval trigger=if(match(value,"@(?!company.com|mycompany.com)([^;]+)"), 1, 0)`: The eval function creates the field "trigger" to be populated with the value 1 if it matches and 0 if it does not. The regex is a negative lookahead, which will identify or filter out email addresses that belong to specific domains (in this case, "company.com" or "mycompany.com") and only act on email addresses with other domains.
+* `| search trigger=1`: Filters for the value 1.
 
 But it makes more sense to break this field with `mvexpand` and use a simple search. I performs better this way.
 
 <figure><img src="../.gitbook/assets/image (2).png" alt=""><figcaption></figcaption></figure>
 
-{% hint style="info" %}
-**| makemv delim=";" value**: Transforms a string with multiple values into a list of values separated by the delimiter ";".\
-**| mvexpand value**: Expands the multiple values into separate rows, duplicating the other fields for each separated value.\
-**| table value, name, operation**: Creates a table displaying the fields "value", "name", and "operation".\
-**| search NOT value="\*@mycompany.com" AND NOT value="\*@company.com":** Excludes events where the "value" field contains "@mycompany.com" and "company.com".
-{% endhint %}
+* `| makemv delim=";" value`: Transforms a string with multiple values into a list of values separated by the delimiter ";".
+* `| mvexpand value:` Expands the multiple values into separate rows, duplicating the other fields for each separated value.
+* `| table value, name, operation`: Creates a table displaying the fields "value", "name", and "operation".
+* `| search NOT value="*@mycompany.com" AND NOT value="*@company.com"`**:** Excludes events where the "value" field contains "@mycompany.com" and "company.com".
 
 ## Conclusion
 
